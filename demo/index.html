@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Taka Virtual Gallery Test</title>
+  <link rel="stylesheet" href="../assets/dist/style.css?v=0.1.2" />
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #000; }
+    body { font-family: Arial, sans-serif; }
+    .test-site-header { min-height: 118px; color: #fff; background: #050505; }
+    .test-site-header__inner { display: flex; align-items: center; justify-content: space-between; width: min(860px, calc(100% - 40px)); min-height: 118px; margin: 0 auto; }
+    .test-brand { font-size: 13px; font-weight: 700; letter-spacing: 4px; white-space: nowrap; }
+    .test-primary-nav { display: flex; gap: 42px; color: #ddd; font-size: 13px; }
+    .test-primary-nav span { white-space: nowrap; }
+    @media (max-width: 600px) {
+      .test-site-header__inner { justify-content: center; width: 100%; }
+      .test-primary-nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="test-site-header" data-testid="site-header">
+    <div class="test-site-header__inner">
+      <div class="test-brand">TAKA. SHASHINBAKA</div>
+      <nav class="test-primary-nav" aria-label="Site navigation">
+        <span>GALLERY</span><span>LOVES</span><span>SKILLS</span><span>ABOUT</span><span>CONTACT</span>
+      </nav>
+    </div>
+  </header>
+  <div class="taka-gallery-root" data-config='{"gallery":"featured","navigation":true,"mobileColumns":2,"tabletColumns":3,"desktopColumns":3,"gap":2}'></div>
+  <script>
+    window.TakaGalleryFrontend = { restUrl: '/wp-json/taka-gallery/v1/', version: 'demo' };
+  </script>
+  <script type="module" src="../assets/dist/frontend.js?v=0.1.2"></script>
+</body>
+</html>
