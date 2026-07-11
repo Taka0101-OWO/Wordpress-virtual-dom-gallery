@@ -63,7 +63,7 @@ npm run build
 
 ### 安全界線
 
-外掛不會把原始路徑、原始檔名、EXIF 資料或永久媒體 URL 傳給公開瀏覽器。衍生檔 URL 綁定 HttpOnly 工作階段並具有有效期限，但這不是 DRM：任何已在瀏覽器顯示的圖片仍可透過開發者工具或螢幕截圖保存。
+外掛不會把原始路徑、原始檔名、EXIF 資料或永久媒體 URL 傳給公開瀏覽器。衍生檔 URL 綁定 HttpOnly 工作階段並具有有效期限，但這不是 DRM
 
 ### 靈感與致謝
 
@@ -131,7 +131,7 @@ npm run build
 
 ### Security boundary
 
-The plugin does not expose original paths, original filenames, EXIF data, or permanent media URLs to public browsers. Derivative URLs are session-bound and expire, but this is not DRM: any image displayed in a browser can still be saved through developer tools or screenshots.
+The plugin does not expose original paths, original filenames, EXIF data, or permanent media URLs to public browsers. Derivative URLs are session-bound and expire, but this is not DRM
 
 ### Inspiration and acknowledgements
 
