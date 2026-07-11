@@ -34,9 +34,9 @@ Taka Virtual Gallery 是一個以私人檔案儲存空間為來源的 WordPress 
 
 完整 masonry layout 會保留頁面高度，但 React 只掛載 viewport 加上上下各半個 viewport 緩衝範圍內的 tile。捲動時會替換離屏節點，而不是讓 DOM 數量隨已載入圖片持續增長。
 
-[![DOM virtualization statistics showing 102 loaded images and 9 mounted tiles](docs/media/virtualized-masonry.webp)](docs/media/virtualized-masonry-demo.mp4)
+![DOM virtualization in the gallery](docs/media/virtualized-masonry.webp)
 
-[觀看 33 秒捲動示範（MP4，約 9.7 MB）](docs/media/virtualized-masonry-demo.mp4)
+<img src="docs/media/debug-hud.png" alt="Debug HUD showing 102 loaded images, 9 mounted DOM tiles, and a 0.5 viewport buffer" width="213">
 
 畫面中的 `Loaded images: 102` 代表已取得並排版的項目；`Mounted DOM tiles: 9` 代表當下實際存在於 DOM 的圖片節點。`Window buffer: 0.5 viewport` 表示可視區域上下各保留半個 viewport 作為 overscan。這個 HUD 只會對具有 `manage_taka_galleries` 權限的管理員顯示，公開訪客不會看到。
 
@@ -102,9 +102,9 @@ The WordPress manager provides gallery summaries, batch actions, background NAS 
 
 The complete masonry layout preserves the page height, while React mounts only tiles inside the viewport plus a half-viewport overscan buffer above and below. Scrolling replaces off-screen nodes instead of continuously growing the DOM.
 
-[![DOM virtualization statistics showing 102 loaded images and 9 mounted tiles](docs/media/virtualized-masonry.webp)](docs/media/virtualized-masonry-demo.mp4)
+![DOM virtualization in the gallery](docs/media/virtualized-masonry.webp)
 
-[Watch the 33-second scrolling demonstration (MP4, approximately 9.7 MB)](docs/media/virtualized-masonry-demo.mp4)
+<img src="docs/media/debug-hud.png" alt="Debug HUD showing 102 loaded images, 9 mounted DOM tiles, and a 0.5 viewport buffer" width="213">
 
 `Loaded images: 102` is the number of fetched and positioned items. `Mounted DOM tiles: 9` is the number of image tiles actually present in the DOM at that moment. `Window buffer: 0.5 viewport` describes the overscan on each side of the visible viewport. The HUD is shown only to administrators with the `manage_taka_galleries` capability; public visitors never receive it.
 
