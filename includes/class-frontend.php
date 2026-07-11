@@ -44,6 +44,9 @@ final class Frontend
             'desktopColumns' => self::bounded($settings['desktop_columns'] ?? 3, 1, 8),
             'gap' => self::bounded($settings['gap'] ?? 2, 0, 40),
         ];
+        if (current_user_can('manage_taka_galleries')) {
+            $data['debug'] = true;
+        }
         return '<div class="taka-gallery-root" data-config="' . esc_attr(wp_json_encode($data)) . '"></div>';
     }
 

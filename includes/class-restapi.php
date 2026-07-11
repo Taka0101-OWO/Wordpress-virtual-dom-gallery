@@ -93,16 +93,6 @@ final class RestApi
                 ['methods' => WP_REST_Server::READABLE, 'callback' => [$this, 'get_settings'], 'permission_callback' => [$this, 'can_manage']],
                 ['methods' => WP_REST_Server::EDITABLE, 'callback' => [$this, 'update_settings'], 'permission_callback' => [$this, 'can_manage']],
             ]);
-            register_rest_route(self::NS, '/migration/discover', [
-                'methods' => WP_REST_Server::READABLE,
-                'callback' => [$this, 'discover_legacy_galleries'],
-                'permission_callback' => [$this, 'can_manage'],
-            ]);
-            register_rest_route(self::NS, '/migration/import', [
-                'methods' => WP_REST_Server::CREATABLE,
-                'callback' => [$this, 'import_legacy_gallery'],
-                'permission_callback' => [$this, 'can_manage'],
-            ]);
             register_rest_route(self::NS, '/media/refresh', [
                 'methods' => WP_REST_Server::CREATABLE,
                 'callback' => [$this, 'refresh_media'],
@@ -246,7 +236,7 @@ final class RestApi
         $status = sanitize_key((string) ($request->get_param('status') ?: 'pending_review'));
         $gallery_id = (int) $request->get_param('galleryId');
         $page = max(1, (int) $request->get_param('page'));
-        $per_page = max(12, min(120, (int) ($request->get_param('perPage') ?: 48)));
+        $per_page = max(12, min(120, (int) ($request->get_param('perPage') ?: 120)));
         $offset = ($page - 1) * $per_page;
         $wpdb = $this->database->wpdb();
         $assets = $this->database->table('assets');
@@ -380,13 +370,6 @@ final class RestApi
                 $settings[$field] = rtrim($value, '/');
             }
         }
-        if ($request->has_param('legacy_upload_prefix')) {
-            $prefix = trim(str_replace('\\', '/', sanitize_text_field((string) $request['legacy_upload_prefix'])), '/');
-            if (str_contains($prefix, '..')) {
-                return new WP_Error('taka_invalid_prefix', 'Legacy prefix cannot contain parent traversal.', ['status' => 400]);
-            }
-            $settings['legacy_upload_prefix'] = $prefix === '' ? '' : $prefix . '/';
-        }
         if ($request->has_param('url_ttl')) {
             $settings['url_ttl'] = max(60, min(3600, (int) $request['url_ttl']));
         }
@@ -398,78 +381,6 @@ final class RestApi
         }
         update_option('taka_gallery_settings', $settings, false);
         return $this->get_settings();
-    }
-
-    public function discover_legacy_galleries(): WP_REST_Response
-    {
-        $wpdb = $this->database->wpdb();
-        $rows = $wpdb->get_results(
-            "SELECT p.ID, p.post_title, pm.meta_value FROM {$wpdb->posts} p
-             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = '_elementor_data'
-             WHERE p.post_status NOT IN ('trash', 'auto-draft') AND pm.meta_value LIKE '%\"widgetType\":\"gallery\"%'",
-            ARRAY_A
-        ) ?: [];
-        $result = [];
-        foreach ($rows as $row) {
-            $tree = json_decode((string) $row['meta_value'], true);
-            if (!is_array($tree)) {
-                continue;
-            }
-            foreach ($this->find_gallery_widgets($tree) as $widget) {
-                $ids = $this->attachment_ids_from_widget($widget);
-                if ($ids) {
-                    $result[] = [
-                        'postId' => (int) $row['ID'], 'postTitle' => $row['post_title'],
-                        'widgetId' => (string) ($widget['id'] ?? ''), 'count' => count($ids),
-                        'suggestedName' => $row['post_title'] ?: 'Imported Gallery',
-                    ];
-                }
-            }
-        }
-        return new WP_REST_Response($result);
-    }
-
-    public function import_legacy_gallery(WP_REST_Request $request): WP_REST_Response|WP_Error
-    {
-        $post_id = (int) $request->get_param('postId');
-        $widget_id = sanitize_key((string) $request->get_param('widgetId'));
-        $name = sanitize_text_field((string) $request->get_param('name'));
-        $tree = json_decode((string) get_post_meta($post_id, '_elementor_data', true), true);
-        if (!$post_id || !$widget_id || !$name || !is_array($tree)) {
-            return new WP_Error('taka_invalid_migration', 'Migration source is invalid.', ['status' => 400]);
-        }
-        $widget = null;
-        foreach ($this->find_gallery_widgets($tree) as $candidate) {
-            if (($candidate['id'] ?? '') === $widget_id) {
-                $widget = $candidate;
-                break;
-            }
-        }
-        if (!$widget) {
-            return new WP_Error('taka_widget_not_found', 'Legacy gallery widget not found.', ['status' => 404]);
-        }
-        $attachment_ids = $this->attachment_ids_from_widget($widget);
-        $gallery_id = $this->ensure_gallery($name);
-        $settings = $this->database->settings();
-        $prefix = (string) $settings['legacy_upload_prefix'];
-        $root = realpath((string) $settings['originals_path']);
-        if ($root === false) {
-            return new WP_Error('taka_originals_unavailable', 'Private originals path is unavailable.', ['status' => 503]);
-        }
-        $imported = 0;
-        $missing = [];
-        foreach ($attachment_ids as $attachment_id) {
-            $attached = str_replace('\\', '/', (string) get_post_meta($attachment_id, '_wp_attached_file', true));
-            $relative = $prefix !== '' && str_starts_with($attached, $prefix) ? substr($attached, strlen($prefix)) : $attached;
-            $relative = ltrim($relative, '/');
-            $absolute = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
-            if (!is_file($absolute) || !is_readable($absolute)) {
-                $missing[] = $attached;
-                continue;
-            }
-            $this->upsert_migrated_asset($gallery_id, $relative, $absolute, $imported);
-        }
-        return new WP_REST_Response(['galleryId' => $gallery_id, 'imported' => $imported, 'missing' => $missing]);
     }
 
     public function get_public_items(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -654,79 +565,4 @@ final class RestApi
         return true;
     }
 
-    private function find_gallery_widgets(array $nodes): array
-    {
-        $found = [];
-        foreach ($nodes as $node) {
-            if (!is_array($node)) {
-                continue;
-            }
-            if (($node['widgetType'] ?? '') === 'gallery') {
-                $found[] = $node;
-            }
-            if (!empty($node['elements']) && is_array($node['elements'])) {
-                $found = array_merge($found, $this->find_gallery_widgets($node['elements']));
-            }
-        }
-        return $found;
-    }
-
-    private function attachment_ids_from_widget(array $widget): array
-    {
-        $gallery = $widget['settings']['gallery'] ?? $widget['settings']['wp_gallery'] ?? [];
-        $ids = [];
-        foreach ((array) $gallery as $image) {
-            $id = is_array($image) ? absint($image['id'] ?? 0) : absint($image);
-            if ($id) {
-                $ids[] = $id;
-            }
-        }
-        return array_values(array_unique($ids));
-    }
-
-    private function ensure_gallery(string $name): int
-    {
-        $wpdb = $this->database->wpdb();
-        $table = $this->database->table('galleries');
-        $base = sanitize_title($name);
-        $slug = $base;
-        $suffix = 2;
-        while ($wpdb->get_var($wpdb->prepare("SELECT id FROM {$table} WHERE slug = %s", $slug))) {
-            $existing = $wpdb->get_row($wpdb->prepare("SELECT id, name FROM {$table} WHERE slug = %s", $slug), ARRAY_A);
-            if ($existing && $existing['name'] === $name) {
-                return (int) $existing['id'];
-            }
-            $slug = $base . '-' . $suffix++;
-        }
-        $wpdb->insert($table, [
-            'name' => $name, 'slug' => $slug, 'status' => 'draft', 'menu_order' => 0,
-            'created_at' => current_time('mysql', true), 'updated_at' => current_time('mysql', true),
-        ]);
-        return (int) $wpdb->insert_id;
-    }
-
-    private function upsert_migrated_asset(int $gallery_id, string $relative, string $absolute, int &$imported): void
-    {
-        $wpdb = $this->database->wpdb();
-        $assets = $this->database->table('assets');
-        $items = $this->database->table('gallery_items');
-        $path_hash = hash('sha256', $relative);
-        $asset_id = (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$assets} WHERE path_hash = %s", $path_hash));
-        if (!$asset_id) {
-            $now = current_time('mysql', true);
-            $wpdb->insert($assets, [
-                'public_id' => bin2hex(random_bytes(16)), 'relative_path' => $relative, 'path_hash' => $path_hash,
-                'file_size' => (int) filesize($absolute), 'file_mtime' => (int) filemtime($absolute),
-                'stable_since' => time() - 31, 'last_seen_at' => $now, 'status' => 'queued',
-                'created_at' => $now, 'updated_at' => $now,
-            ]);
-            $asset_id = (int) $wpdb->insert_id;
-        }
-        $wpdb->query($wpdb->prepare(
-            "INSERT INTO {$items} (gallery_id, asset_id, position, status) VALUES (%d, %d, %d, 'pending')
-             ON DUPLICATE KEY UPDATE position = VALUES(position)",
-            $gallery_id, $asset_id, $imported
-        ));
-        $imported++;
-    }
 }

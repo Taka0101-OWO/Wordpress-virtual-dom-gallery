@@ -3,7 +3,7 @@ Contributors: taka
 Tags: gallery, masonry, virtualization, elementor, nas
 Requires at least: 6.6
 Requires PHP: 8.1
-Stable tag: 0.1.5
+Stable tag: 0.1.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -25,6 +25,16 @@ browser can still be saved through developer tools or screenshots. This plugin
 is not DRM.
 
 == Changelog ==
+
+= 0.1.7 =
+* Move administrator development statistics to the viewport top-left.
+* Offset the statistics below the WordPress admin bar on desktop and mobile.
+* Document safe diagnosis and removal of duplicate inactive plugin folders.
+
+= 0.1.6 =
+* Increase the gallery manager page size to 120 assets.
+* Show virtual masonry statistics to gallery administrators.
+* Remove the completed legacy Elementor gallery migration workflow.
 
 = 0.1.5 =
 * Fix numeric filename cursor ordering so background scans do not skip images after a batch boundary.

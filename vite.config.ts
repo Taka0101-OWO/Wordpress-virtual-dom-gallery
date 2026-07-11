@@ -190,7 +190,10 @@ function demoRoutes(): Plugin {
           return;
         }
         if (url.pathname === '/gallery' || url.pathname === '/gallery/') {
-          const source = readFileSync(resolve(__dirname, 'demo/index.html'), 'utf8');
+          let source = readFileSync(resolve(__dirname, 'demo/index.html'), 'utf8');
+          if (url.searchParams.get('adminBar') === '1') {
+            source = source.replace('<body>', '<body class="admin-bar">');
+          }
           const html = await server.transformIndexHtml(url.pathname, source);
           response.statusCode = 200;
           response.setHeader('Content-Type', 'text/html; charset=utf-8');

@@ -6,7 +6,7 @@ use wpdb;
 
 final class Database
 {
-    public const DB_VERSION = '2';
+    public const DB_VERSION = '3';
 
     private wpdb $wpdb;
 
@@ -101,7 +101,6 @@ final class Database
             'url_ttl' => 600,
             'scan_batch' => 100,
             'process_batch' => 5,
-            'legacy_upload_prefix' => '',
         ]);
 
         $role = get_role('administrator');
@@ -126,12 +125,20 @@ final class Database
 
     public function maybe_upgrade(): void
     {
-        if ((string) get_option('taka_gallery_db_version', '0') === self::DB_VERSION) {
+        $installed = (int) get_option('taka_gallery_db_version', '0');
+        if ($installed >= (int) self::DB_VERSION) {
             return;
         }
-        $folders = $this->table('gallery_folders');
-        $this->wpdb->query("UPDATE {$folders} SET scan_cursor = NULL, scan_started_at = NULL");
-        delete_option('taka_gallery_scan_job');
+        if ($installed < 2) {
+            $folders = $this->table('gallery_folders');
+            $this->wpdb->query("UPDATE {$folders} SET scan_cursor = NULL, scan_started_at = NULL");
+            delete_option('taka_gallery_scan_job');
+        }
+        if ($installed < 3) {
+            $settings = (array) get_option('taka_gallery_settings', []);
+            unset($settings['legacy_upload_prefix']);
+            update_option('taka_gallery_settings', $settings, false);
+        }
         update_option('taka_gallery_db_version', self::DB_VERSION, false);
     }
 
@@ -148,7 +155,6 @@ final class Database
             'url_ttl' => 600,
             'scan_batch' => 100,
             'process_batch' => 5,
-            'legacy_upload_prefix' => '',
         ]);
     }
 

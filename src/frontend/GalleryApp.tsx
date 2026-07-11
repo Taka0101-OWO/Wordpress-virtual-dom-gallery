@@ -4,6 +4,7 @@ import { apiFetch } from '../shared/api';
 import type { Gallery, GalleryAsset } from '../shared/types';
 import { buildMasonryLayout, columnCount, visibleItems } from './layout';
 import { GalleryTile } from './GalleryTile';
+import { DebugHud } from './DebugHud';
 
 type Config = {
   gallery: string;
@@ -12,6 +13,7 @@ type Config = {
   tabletColumns: number;
   desktopColumns: number;
   gap: number;
+  debug?: boolean;
 };
 
 type PageState = {
@@ -177,6 +179,7 @@ export function GalleryApp({ config, restUrl }: Props) {
         {loading && <LoaderCircle className="is-spinning" aria-label="Loading" />}
         {error && <button type="button" onClick={() => loadMore()}><RefreshCw aria-hidden="true" /> Retry</button>}
       </div>
+      {config.debug && <DebugHud loaded={current.items.length} mounted={visible.length} />}
     </section>
   );
 }

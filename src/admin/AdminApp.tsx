@@ -4,6 +4,7 @@ import { apiFetch } from '../shared/api';
 import type { AdminAsset, FolderMapping, Gallery } from '../shared/types';
 import { processResultNotice, type ProcessResult } from './processResult';
 import { scanJobActive, scanJobLabel, scanJobNotice, scanJobProgress, type ScanJobState } from './scanJob';
+import { ADMIN_ASSETS_PER_PAGE } from './adminPaging';
 
 type Config = { restUrl: string; nonce: string; version: string };
 type AssetResponse = { items: AdminAsset[]; total: number; page: number; pages: number };
@@ -13,7 +14,6 @@ type SettingsData = {
   url_ttl: number;
   scan_batch: number;
   process_batch: number;
-  legacy_upload_prefix: string;
   originalsReadable?: boolean;
   derivativesWritable?: boolean;
   imagickAvailable?: boolean;
@@ -57,7 +57,7 @@ export function AdminApp({ config }: { config: Config }) {
 
   const loadAssets = useCallback(async (page = 1) => {
     if (activeTab === 'settings') return;
-    const query = new URLSearchParams({ status: activeTab, page: String(page), perPage: '48' });
+    const query = new URLSearchParams({ status: activeTab, page: String(page), perPage: String(ADMIN_ASSETS_PER_PAGE) });
     if (galleryFilter) query.set('galleryId', String(galleryFilter));
     setAssets(await request<AssetResponse>(`assets?${query}`));
     setSelected(new Set());
@@ -262,8 +262,6 @@ function SettingsView({ settings, galleries, folders, request, onChanged, setNot
   const [galleryName, setGalleryName] = useState('');
   const [galleryId, setGalleryId] = useState(0);
   const [folderPath, setFolderPath] = useState('');
-  const [migration, setMigration] = useState<Array<{ postId: number; postTitle: string; widgetId: string; count: number; suggestedName: string }>>([]);
-  const [migrationNames, setMigrationNames] = useState<Record<string, string>>({});
 
   useEffect(() => setForm(settings), [settings]);
 
@@ -313,25 +311,6 @@ function SettingsView({ settings, galleries, folders, request, onChanged, setNot
     await onChanged();
   };
 
-  const discoverMigration = async () => {
-    try {
-      const rows = await request<typeof migration>('migration/discover');
-      setMigration(rows);
-      setMigrationNames(Object.fromEntries(rows.map((row) => [`${row.postId}:${row.widgetId}`, row.suggestedName])));
-      if (!rows.length) setNotice({ type: 'success', message: '沒有找到可匯入的 Elementor Gallery。' });
-    } catch (reason) { setNotice({ type: 'error', message: errorMessage(reason) }); }
-  };
-
-  const importMigration = async (row: typeof migration[number]) => {
-    const key = `${row.postId}:${row.widgetId}`;
-    try {
-      const result = await request<{ imported: number; missing: string[] }>('migration/import', { method: 'POST', body: JSON.stringify({ postId: row.postId, widgetId: row.widgetId, name: migrationNames[key] || row.suggestedName }) });
-      setNotice({ type: result.missing.length ? 'error' : 'success', message: `已建立 ${result.imported} 筆私有索引；找不到 ${result.missing.length} 筆原檔。` });
-      setMigration((current) => current.filter((candidate) => `${candidate.postId}:${candidate.widgetId}` !== key));
-      await onChanged();
-    } catch (reason) { setNotice({ type: 'error', message: errorMessage(reason) }); }
-  };
-
   return (
     <div className="taka-settings">
       <section>
@@ -339,7 +318,6 @@ function SettingsView({ settings, galleries, folders, request, onChanged, setNot
         <form className="taka-form" onSubmit={saveSettings}>
           <label>原圖私有路徑<input value={form.originals_path} onChange={(event) => setForm({ ...form, originals_path: event.target.value })} /></label>
           <label>衍生檔私有路徑<input value={form.derivatives_path} onChange={(event) => setForm({ ...form, derivatives_path: event.target.value })} /></label>
-          <label>舊媒體路徑前綴<input value={form.legacy_upload_prefix} onChange={(event) => setForm({ ...form, legacy_upload_prefix: event.target.value })} /></label>
           <div className="taka-form__row">
             <label>URL 時效（秒）<input type="number" min="60" max="3600" value={form.url_ttl} onChange={(event) => setForm({ ...form, url_ttl: Number(event.target.value) })} /></label>
             <label>掃描批次<input type="number" min="10" max="1000" value={form.scan_batch} onChange={(event) => setForm({ ...form, scan_batch: Number(event.target.value) })} /></label>
@@ -366,16 +344,6 @@ function SettingsView({ settings, galleries, folders, request, onChanged, setNot
         </form>
         <div className="taka-list">
           {folders.map((folder) => <div key={folder.id} className={folder.lastError ? 'has-error' : ''}><span><strong>{folder.relativePath}</strong><small>{folder.galleryName} · {folder.scanCursor ? '同步中' : folder.lastScanAt || '尚未同步'}</small>{folder.lastError && <em>{folder.lastError}</em>}</span><button type="button" title="移除映射" onClick={() => removeFolder(folder.id)}><Trash2 /></button></div>)}
-        </div>
-      </section>
-      <section className="taka-migration">
-        <h2>舊 Elementor 圖庫</h2>
-        <button className="button" type="button" onClick={discoverMigration}><FolderSync /> 掃描舊圖庫</button>
-        <div className="taka-list">
-          {migration.map((row) => {
-            const key = `${row.postId}:${row.widgetId}`;
-            return <div key={key}><span><strong>{row.postTitle || `Post ${row.postId}`}</strong><small>{row.count} 張 · widget {row.widgetId}</small><input value={migrationNames[key] || ''} onChange={(event) => setMigrationNames({ ...migrationNames, [key]: event.target.value })} /></span><button className="button" type="button" title="匯入" onClick={() => importMigration(row)}><Plus /></button></div>;
-          })}
         </div>
       </section>
     </div>

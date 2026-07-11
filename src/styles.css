@@ -24,6 +24,9 @@
 .taka-gallery__status { display: grid; place-items: center; min-height: 56px; background: #000; color: #fff; }
 .taka-gallery__status button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; color: #fff; background: transparent; border: 1px solid #555; border-radius: 4px; cursor: pointer; }
 .taka-gallery__status svg { width: 20px; height: 20px; }
+.taka-gallery__debug { position: fixed; top: 12px; left: 12px; z-index: 9999; display: grid; gap: 3px; padding: 9px 11px; color: #f5f5f5; background: rgba(9, 11, 12, .86); border: 1px solid rgba(255, 255, 255, .2); border-radius: 4px; box-shadow: 0 4px 18px rgba(0, 0, 0, .34); font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; letter-spacing: 0; pointer-events: none; }
+.taka-gallery__debug span { display: block; white-space: nowrap; }
+.admin-bar .taka-gallery__debug { top: 44px; }
 .is-spinning { animation: taka-spin .8s linear infinite; }
 @keyframes taka-spin { to { transform: rotate(360deg); } }
 
@@ -99,10 +102,6 @@
 .taka-list em { color: var(--taka-danger); font-size: 12px; font-style: normal; }
 .taka-list button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: #6b737a; background: transparent; border: 0; cursor: pointer; }
 .taka-list button:hover { color: var(--taka-danger); }
-.taka-migration { grid-column: 1 / -1; }
-.taka-migration > .button { margin-bottom: 16px; }
-.taka-migration .taka-list input { width: min(360px, 100%); margin-top: 4px; }
-
 @media (max-width: 900px) {
   .taka-admin__header { align-items: flex-start; flex-direction: column; }
   .taka-admin__summary { grid-template-columns: repeat(2, 1fr); }
@@ -120,6 +119,11 @@
   .taka-assets-toolbar { align-items: stretch; flex-direction: column; }
   .taka-assets-toolbar__commands { margin-left: 0; }
   .taka-scan-progress { margin-inline: 20px; }
+  .taka-gallery__debug { left: 8px; }
+}
+@media (max-width: 782px) {
+  .taka-gallery__debug { gap: 1px; padding: 5px 8px; font-size: 10px; line-height: 1.35; }
+  .admin-bar .taka-gallery__debug { top: 58px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .taka-tile img { opacity: 1; transform: none; transition: none; }
