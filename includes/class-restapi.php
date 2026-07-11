@@ -13,7 +13,7 @@ final class RestApi
 
     public function __construct(
         private Database $database,
-        private Scanner $scanner,
+        private ScanJob $scan_job,
         private ImageProcessor $processor,
         private Signer $signer,
         private MediaSession $media_session
@@ -55,6 +55,11 @@ final class RestApi
                 'callback' => [$this, 'publish_assets'],
                 'permission_callback' => [$this, 'can_manage'],
             ]);
+            register_rest_route(self::NS, '/assets/unpublish', [
+                'methods' => WP_REST_Server::EDITABLE,
+                'callback' => [$this, 'unpublish_assets'],
+                'permission_callback' => [$this, 'can_manage'],
+            ]);
             register_rest_route(self::NS, '/assets/retry', [
                 'methods' => WP_REST_Server::EDITABLE,
                 'callback' => [$this, 'retry_assets'],
@@ -65,15 +70,19 @@ final class RestApi
                 'callback' => [$this, 'exclude_assets'],
                 'permission_callback' => [$this, 'can_manage'],
             ]);
+            register_rest_route(self::NS, '/assets/restore', [
+                'methods' => WP_REST_Server::EDITABLE,
+                'callback' => [$this, 'restore_assets'],
+                'permission_callback' => [$this, 'can_manage'],
+            ]);
             register_rest_route(self::NS, '/assets/assign', [
                 'methods' => WP_REST_Server::EDITABLE,
                 'callback' => [$this, 'assign_assets'],
                 'permission_callback' => [$this, 'can_manage'],
             ]);
             register_rest_route(self::NS, '/jobs/scan', [
-                'methods' => WP_REST_Server::CREATABLE,
-                'callback' => [$this, 'run_scan'],
-                'permission_callback' => [$this, 'can_manage'],
+                ['methods' => WP_REST_Server::READABLE, 'callback' => [$this, 'get_scan_job'], 'permission_callback' => [$this, 'can_manage']],
+                ['methods' => WP_REST_Server::CREATABLE, 'callback' => [$this, 'run_scan'], 'permission_callback' => [$this, 'can_manage']],
             ]);
             register_rest_route(self::NS, '/jobs/process', [
                 'methods' => WP_REST_Server::CREATABLE,
@@ -111,15 +120,20 @@ final class RestApi
     {
         $admin = $this->can_manage() && $request->get_param('context') === 'edit';
         $rows = $this->database->get_galleries(!$admin);
-        return new WP_REST_Response(array_map(static fn (array $row): array => [
-            'id' => (int) $row['id'],
-            'name' => $row['name'],
-            'slug' => $row['slug'],
-            'status' => $row['status'],
-            'menuOrder' => (int) $row['menu_order'],
-            'publishedCount' => (int) $row['published_count'],
-            'pendingCount' => (int) $row['pending_count'],
-        ], $rows));
+        return new WP_REST_Response(array_map(static function (array $row) use ($admin): array {
+            $gallery = [
+                'id' => (int) $row['id'],
+                'name' => $row['name'],
+                'slug' => $row['slug'],
+                'status' => $row['status'],
+                'menuOrder' => (int) $row['menu_order'],
+                'publishedCount' => (int) $row['published_count'],
+            ];
+            if ($admin) {
+                $gallery['pendingCount'] = (int) $row['pending_count'];
+            }
+            return $gallery;
+        }, $rows));
     }
 
     public function create_gallery(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -293,24 +307,19 @@ final class RestApi
         return new WP_REST_Response(['queued' => count($ids)]);
     }
 
+    public function unpublish_assets(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->transition_assets($request, 'published', 'pending_review', 'publish', 'pending', 'unpublished');
+    }
+
     public function exclude_assets(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
-        $ids = $this->id_list($request->get_param('assetIds'));
-        if (!$ids) {
-            return new WP_Error('taka_no_assets', 'Select at least one asset.', ['status' => 400]);
-        }
-        $wpdb = $this->database->wpdb();
-        $marks = implode(',', array_fill(0, count($ids), '%d'));
-        $now = current_time('mysql', true);
-        $wpdb->query($wpdb->prepare(
-            "UPDATE {$this->database->table('assets')} SET status = 'excluded', updated_at = %s WHERE id IN ({$marks})",
-            ...array_merge([$now], $ids)
-        ));
-        $wpdb->query($wpdb->prepare(
-            "UPDATE {$this->database->table('gallery_items')} SET status = 'excluded' WHERE asset_id IN ({$marks})",
-            ...$ids
-        ));
-        return new WP_REST_Response(['excluded' => count($ids)]);
+        return $this->transition_assets($request, 'pending_review', 'excluded', 'pending', 'excluded', 'excluded');
+    }
+
+    public function restore_assets(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->transition_assets($request, 'excluded', 'pending_review', 'excluded', 'pending', 'restored');
     }
 
     public function assign_assets(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -336,7 +345,12 @@ final class RestApi
 
     public function run_scan(): WP_REST_Response
     {
-        return new WP_REST_Response($this->scanner->scan_all());
+        return new WP_REST_Response($this->scan_job->start(), 202);
+    }
+
+    public function get_scan_job(): WP_REST_Response
+    {
+        return new WP_REST_Response($this->scan_job->status());
     }
 
     public function run_process(): WP_REST_Response
@@ -350,6 +364,7 @@ final class RestApi
         $settings['originalsReadable'] = is_readable((string) $settings['originals_path']);
         $settings['derivativesWritable'] = is_writable((string) $settings['derivatives_path']);
         $settings['imagickAvailable'] = class_exists('Imagick');
+        $settings['xSendfileReady'] = MediaEndpoint::xsendfile_ready();
         return new WP_REST_Response($settings);
     }
 
@@ -565,6 +580,49 @@ final class RestApi
     private function id_list(mixed $input): array
     {
         return array_values(array_unique(array_filter(array_map('absint', (array) $input))));
+    }
+
+    private function transition_assets(
+        WP_REST_Request $request,
+        string $asset_from,
+        string $asset_to,
+        string $item_from,
+        string $item_to,
+        string $response_key
+    ): WP_REST_Response|WP_Error {
+        $ids = $this->id_list($request->get_param('assetIds'));
+        if (!$ids) {
+            return new WP_Error('taka_no_assets', 'Select at least one asset.', ['status' => 400]);
+        }
+
+        $wpdb = $this->database->wpdb();
+        $marks = implode(',', array_fill(0, count($ids), '%d'));
+        $valid_ids = array_map('intval', $wpdb->get_col($wpdb->prepare(
+            "SELECT id FROM {$this->database->table('assets')} WHERE id IN ({$marks}) AND status = %s",
+            ...array_merge($ids, [$asset_from])
+        )) ?: []);
+        if (!$valid_ids) {
+            return new WP_REST_Response([$response_key => 0]);
+        }
+        $marks = implode(',', array_fill(0, count($valid_ids), '%d'));
+        $now = current_time('mysql', true);
+        $wpdb->query('START TRANSACTION');
+        $updated = $wpdb->query($wpdb->prepare(
+            "UPDATE {$this->database->table('assets')} SET status = %s, updated_at = %s
+             WHERE id IN ({$marks}) AND status = %s",
+            ...array_merge([$asset_to, $now], $valid_ids, [$asset_from])
+        ));
+        $items_updated = $wpdb->query($wpdb->prepare(
+            "UPDATE {$this->database->table('gallery_items')} SET status = %s, published_at = NULL
+             WHERE asset_id IN ({$marks}) AND status = %s",
+            ...array_merge([$item_to], $valid_ids, [$item_from])
+        ));
+        if ($updated === false || $items_updated === false) {
+            $wpdb->query('ROLLBACK');
+            return new WP_Error('taka_asset_transition_failed', 'The selected assets could not be updated.', ['status' => 500]);
+        }
+        $wpdb->query('COMMIT');
+        return new WP_REST_Response([$response_key => (int) $updated]);
     }
 
     private function encode_cursor(int $rank, int $id): string

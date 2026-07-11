@@ -9,12 +9,15 @@ Taka Virtual Gallery 是一個以私人檔案儲存空間為來源的 WordPress 
 > [!NOTE]
 > 本專案是 **vibecoding 產物**。在正式環境使用前，請自行審查程式碼、安全邊界及部署方式。
 
-### 功能
-- 增量掃描及索引私人圖片資料夾
-- 圖片批次審核、指派、排除與發布
-- 由瀏覽器工作階段綁定的短效簽名 URL 傳送 WebP 衍生檔
+### v0.1.5 功能
+
+- 增量與背景資料夾掃描，保留持久化進度並可靠處理數字檔名游標
+- 圖片批次審核、指派、排除、還原、發布與撤回
+- 可重試的 WebP 衍生檔處理及等比例私人縮圖生成
+- 由瀏覽器工作階段綁定的短效簽名 URL 傳送私人圖片
+- Apache 傳送採 fail-closed 設計，不會退回公開 X-Sendfile 路徑
 - Elementor widget 與 `[taka_gallery]` shortcode
-- 響應式、視窗化的 masonry layout，支援穩定的單頁隨機排序
+- 響應式、視窗化 masonry layout 與穩定的單頁隨機排序
 - 黑色 placeholder 與一次性圖片顯示動畫
 
 ### 系統需求
@@ -29,13 +32,13 @@ Taka Virtual Gallery 是一個以私人檔案儲存空間為來源的 WordPress 
 
 ### 安裝與設定
 
-1. 將此外掛目錄放入 WordPress 的 `wp-content/plugins/`，或自行封裝為 ZIP 後上傳。
+1. 將外掛目錄放入 WordPress 的 `wp-content/plugins/`，或封裝為 ZIP 後上傳。
 2. 啟用 **Taka Virtual Gallery**。
-3. 在 WordPress 後台的 **Taka Gallery → 設定** 填入原圖與衍生檔的絕對路徑。
-4. 確認儲存環境狀態正常後，再建立圖庫、映射相對資料夾及開始掃描。
+3. 在 **Taka Gallery → 設定** 填入原圖與衍生檔的絕對路徑。
+4. 確認儲存環境狀態正常，再建立圖庫、映射相對資料夾及開始掃描。
 5. 在 Elementor 加入 **Taka Virtual Gallery** widget，或使用 `[taka_gallery]` shortcode。
 
-本倉庫刻意不提供任何特定主機、NAS、容器或反向代理設定。請依自己的環境建立最小權限的私人儲存空間及媒體傳送設定。
+本倉庫刻意不提供特定主機、NAS、容器或反向代理設定。請依自己的環境，以最小權限原則設定私人儲存空間及媒體傳送。
 
 ### 開發
 
@@ -47,15 +50,13 @@ npm run lint:php
 npm run build
 ```
 
-`assets/dist/` 是外掛執行所需的已編譯前端資源，會保留在版本庫中；`node_modules/` 與本機快取不會提交。
+`assets/dist/` 是外掛執行所需的已編譯前端資源；`node_modules/`、本機快取及環境設定不會提交。
 
 ### 安全界線
 
-外掛不會把原始路徑、原始檔名、EXIF 資料或永久媒體 URL 傳給公開瀏覽器。衍生檔 URL 綁定 HttpOnly 工作階段並具有有效期限，但這不是 DRM
+外掛不會把原始路徑、原始檔名、EXIF 資料或永久媒體 URL 傳給公開瀏覽器。衍生檔 URL 綁定 HttpOnly 工作階段並具有有效期限，但這不是 DRM：任何已在瀏覽器顯示的圖片仍可透過開發者工具或螢幕截圖保存。
 
 ### 靈感與致謝
-
-本專案的圖庫體驗與虛擬化 masonry 實作受到以下專案啟發：
 
 - [brunofranciscojs/react-gallery](https://github.com/brunofranciscojs/react-gallery)
 - [gs25087/Virtualized-Masonry-Grid](https://github.com/gs25087/Virtualized-Masonry-Grid)
@@ -71,11 +72,13 @@ Taka Virtual Gallery is a WordPress gallery plugin backed by private file storag
 > [!NOTE]
 > This project is a **vibecoding product**. Review the code, security boundaries, and deployment design before using it in production.
 
-### Features
+### v0.1.5 features
 
-- Incremental scanning and indexing of private image folders
-- Batch review, assignment, exclusion, and publishing
-- WebP derivatives delivered through short-lived signed URLs bound to a browser session
+- Incremental and background folder scanning with persistent progress and reliable numeric filename cursors
+- Batch review, assignment, exclusion, restoration, publishing, and withdrawal
+- Retryable WebP derivative processing with proportional private thumbnail generation
+- Private images delivered through short-lived signed URLs bound to a browser session
+- Fail-closed Apache delivery that never falls back to exposing X-Sendfile paths
 - Elementor widget and `[taka_gallery]` shortcode
 - Responsive, windowed masonry with stable per-page random ordering
 - Black placeholders and a one-time image reveal animation
@@ -98,7 +101,7 @@ Taka Virtual Gallery is a WordPress gallery plugin backed by private file storag
 4. Confirm that the storage health check passes before creating galleries, mapping relative folders, or starting a scan.
 5. Add the **Taka Virtual Gallery** Elementor widget or use the `[taka_gallery]` shortcode.
 
-This repository intentionally excludes host-specific NAS, container, proxy, and server configuration. Configure private storage and media delivery for your own environment using least-privilege access.
+This repository intentionally excludes host-specific NAS, container, proxy, and server configuration. Configure private storage and media delivery for your environment using least-privilege access.
 
 ### Development
 
@@ -110,15 +113,13 @@ npm run lint:php
 npm run build
 ```
 
-`assets/dist/` contains the compiled frontend assets required at runtime and is committed. `node_modules/` and local caches are excluded.
+`assets/dist/` contains the compiled frontend assets required at runtime. `node_modules/`, local caches, and environment configuration are excluded.
 
 ### Security boundary
 
-The plugin does not expose original paths, original filenames, EXIF data, or permanent media URLs to public browsers. Derivative URLs are session-bound and expire, but this is not DRM
+The plugin does not expose original paths, original filenames, EXIF data, or permanent media URLs to public browsers. Derivative URLs are session-bound and expire, but this is not DRM: any image displayed in a browser can still be saved through developer tools or screenshots.
 
 ### Inspiration and acknowledgements
-
-The gallery experience and virtualized masonry implementation were inspired by:
 
 - [brunofranciscojs/react-gallery](https://github.com/brunofranciscojs/react-gallery)
 - [gs25087/Virtualized-Masonry-Grid](https://github.com/gs25087/Virtualized-Masonry-Grid)

@@ -101,22 +101,28 @@ final class ImageProcessor
 
         foreach (Signer::WIDTHS as $target_width) {
             $variant = clone $image;
-            if ($variant->getImageWidth() > $target_width) {
-                $variant->thumbnailImage($target_width, 0, true, true);
-            }
-            $variant->stripImage();
-            $variant->setImageFormat('webp');
-            $variant->setImageCompressionQuality(82);
-            $variant->setOption('webp:method', '5');
             $destination = $target_dir . DIRECTORY_SEPARATOR . $target_width . '.webp';
             $temporary = $destination . '.tmp-' . bin2hex(random_bytes(4));
-            if (!$variant->writeImage($temporary) || !rename($temporary, $destination)) {
-                @unlink($temporary);
-                throw new \RuntimeException('Unable to write a derivative image.');
+            try {
+                if ($variant->getImageWidth() > $target_width && !$variant->thumbnailImage($target_width, 0, false, false)) {
+                    throw new \RuntimeException('Unable to resize a derivative image.');
+                }
+                $variant->setImagePage(0, 0, 0, 0);
+                $variant->stripImage();
+                $variant->setImageFormat('webp');
+                $variant->setImageCompressionQuality(82);
+                $variant->setOption('webp:method', '5');
+                if (!$variant->writeImage($temporary) || !rename($temporary, $destination)) {
+                    throw new \RuntimeException('Unable to write a derivative image.');
+                }
+                @chmod($destination, 0640);
+            } finally {
+                if (is_file($temporary)) {
+                    @unlink($temporary);
+                }
+                $variant->clear();
+                $variant->destroy();
             }
-            @chmod($destination, 0640);
-            $variant->clear();
-            $variant->destroy();
         }
         $image->clear();
         $image->destroy();

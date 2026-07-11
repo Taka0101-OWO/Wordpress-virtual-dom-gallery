@@ -5,7 +5,7 @@ export type Gallery = {
   status: 'publish' | 'draft';
   menuOrder: number;
   publishedCount: number;
-  pendingCount: number;
+  pendingCount?: number;
 };
 
 export type MediaSource = {

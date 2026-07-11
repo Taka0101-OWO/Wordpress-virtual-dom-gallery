@@ -1,7 +1,9 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Check, CircleGauge, FolderSync, GalleryHorizontalEnd, LoaderCircle, Plus, RefreshCw, RotateCcw, Save, Settings, Trash2 } from 'lucide-react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, ArchiveRestore, Ban, Check, CircleGauge, FolderSync, GalleryHorizontalEnd, LoaderCircle, Plus, RefreshCw, RotateCcw, Save, Settings, Trash2 } from 'lucide-react';
 import { apiFetch } from '../shared/api';
 import type { AdminAsset, FolderMapping, Gallery } from '../shared/types';
+import { processResultNotice, type ProcessResult } from './processResult';
+import { scanJobActive, scanJobLabel, scanJobNotice, scanJobProgress, type ScanJobState } from './scanJob';
 
 type Config = { restUrl: string; nonce: string; version: string };
 type AssetResponse = { items: AdminAsset[]; total: number; page: number; pages: number };
@@ -15,11 +17,13 @@ type SettingsData = {
   originalsReadable?: boolean;
   derivativesWritable?: boolean;
   imagickAvailable?: boolean;
+  xSendfileReady?: boolean;
 };
 
 const tabs = [
   { id: 'pending_review', label: '待發布', icon: CircleGauge },
   { id: 'published', label: '已發布', icon: Check },
+  { id: 'excluded', label: '已排除', icon: Ban },
   { id: 'queued', label: '處理佇列', icon: RefreshCw },
   { id: 'error', label: '錯誤', icon: AlertTriangle },
   { id: 'settings', label: '設定', icon: Settings },
@@ -35,6 +39,8 @@ export function AdminApp({ config }: { config: Config }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [scanJob, setScanJob] = useState<ScanJobState | null>(null);
+  const previousScanStatus = useRef('idle');
 
   const request = useCallback(<T,>(path: string, init?: RequestInit) => apiFetch<T>(config.restUrl, path, init, config.nonce), [config]);
 
@@ -57,15 +63,39 @@ export function AdminApp({ config }: { config: Config }) {
     setSelected(new Set());
   }, [activeTab, galleryFilter, request]);
 
+  const loadScanJob = useCallback(async () => {
+    const job = await request<ScanJobState>('jobs/scan');
+    const wasActive = ['queued', 'running', 'waiting'].includes(previousScanStatus.current);
+    setScanJob(job);
+    previousScanStatus.current = job.status;
+    if (wasActive && !scanJobActive(job)) {
+      setNotice(scanJobNotice(job));
+      await Promise.all([loadStructure(), loadAssets()]);
+    }
+  }, [loadAssets, loadStructure, request]);
+
   useEffect(() => { loadStructure().catch(showError(setNotice)); }, [loadStructure]);
   useEffect(() => { loadAssets().catch(showError(setNotice)); }, [loadAssets]);
+  useEffect(() => { loadScanJob().catch(showError(setNotice)); }, [loadScanJob]);
+  useEffect(() => {
+    if (!scanJobActive(scanJob)) return;
+    const timer = window.setInterval(() => { loadScanJob().catch(showError(setNotice)); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [loadScanJob, scanJob]);
 
   const runJob = async (job: 'scan' | 'process') => {
     setBusy(job);
     setNotice(null);
     try {
-      const result = await request<Record<string, unknown>>(`jobs/${job}`, { method: 'POST', body: '{}' });
-      setNotice({ type: 'success', message: job === 'scan' ? 'NAS 增量掃描完成一個批次。' : '衍生檔處理完成一個批次。' });
+      if (job === 'scan') {
+        const result = await request<ScanJobState>('jobs/scan', { method: 'POST', body: '{}' });
+        previousScanStatus.current = result.status;
+        setScanJob(result);
+        setNotice({ type: 'success', message: 'NAS 背景同步已啟動。' });
+        return result;
+      }
+      const result = await request<Record<string, unknown> | ProcessResult>(`jobs/${job}`, { method: 'POST', body: '{}' });
+      setNotice(processResultNotice(result as ProcessResult));
       await Promise.all([loadStructure(), loadAssets()]);
       return result;
     } catch (reason) {
@@ -75,12 +105,19 @@ export function AdminApp({ config }: { config: Config }) {
     }
   };
 
-  const applySelection = async (action: 'publish' | 'retry' | 'exclude') => {
+  const applySelection = async (action: 'publish' | 'retry' | 'exclude' | 'unpublish' | 'restore') => {
     if (!selected.size) return;
+    if (action === 'unpublish' && !window.confirm(`撤回所選的 ${selected.size} 張照片？照片會回到「待發布」。`)) return;
     setBusy(action);
     try {
-      await request(`assets/${action}`, { method: 'POST', body: JSON.stringify({ assetIds: Array.from(selected) }) });
-      setNotice({ type: 'success', message: action === 'publish' ? `已發布 ${selected.size} 張圖片。` : action === 'exclude' ? `已排除 ${selected.size} 張圖片。` : `已將 ${selected.size} 張圖片放回處理佇列。` });
+      const result = await request<Record<string, number>>(`assets/${action}`, { method: 'POST', body: JSON.stringify({ assetIds: Array.from(selected) }) });
+      const changed = result.unpublished ?? result.restored ?? result.excluded ?? selected.size;
+      const message = action === 'publish' ? `已發布 ${changed} 張圖片。`
+        : action === 'exclude' ? `已排除 ${changed} 張圖片。`
+          : action === 'unpublish' ? `已撤回 ${changed} 張圖片並移至待發布。`
+            : action === 'restore' ? `已恢復 ${changed} 張圖片至待發布。`
+              : `已將 ${changed} 張圖片放回處理佇列。`;
+      setNotice({ type: 'success', message });
       await Promise.all([loadStructure(), loadAssets()]);
     } catch (reason) {
       setNotice({ type: 'error', message: errorMessage(reason) });
@@ -100,6 +137,8 @@ export function AdminApp({ config }: { config: Config }) {
     finally { setBusy(''); }
   };
 
+  const storageHealthy = !!(settings?.originalsReadable && settings.derivativesWritable && settings.imagickAvailable && settings.xSendfileReady);
+
   return (
     <main className="taka-admin">
       <header className="taka-admin__header">
@@ -108,8 +147,8 @@ export function AdminApp({ config }: { config: Config }) {
           <h1>Gallery Manager</h1>
         </div>
         <div className="taka-admin__actions">
-          <button className="button" type="button" disabled={!!busy} onClick={() => runJob('scan')}>
-            {busy === 'scan' ? <LoaderCircle className="is-spinning" /> : <FolderSync />} 同步 NAS
+          <button className="button" type="button" disabled={!!busy || scanJobActive(scanJob)} onClick={() => runJob('scan')}>
+            {scanJobActive(scanJob) || busy === 'scan' ? <LoaderCircle className="is-spinning" /> : <FolderSync />} 同步 NAS
           </button>
           <button className="button button-primary" type="button" disabled={!!busy} onClick={() => runJob('process')}>
             {busy === 'process' ? <LoaderCircle className="is-spinning" /> : <RefreshCw />} 處理佇列
@@ -118,13 +157,14 @@ export function AdminApp({ config }: { config: Config }) {
       </header>
 
       {notice && <div className={`taka-notice is-${notice.type}`} role="status">{notice.message}</div>}
+      {scanJob && scanJobActive(scanJob) && <ScanProgress job={scanJob} />}
 
       <section className="taka-admin__summary" aria-label="圖庫狀態">
         <div><strong>{galleries.length}</strong><span>圖庫</span></div>
         <div><strong>{galleries.reduce((sum, row) => sum + row.publishedCount, 0)}</strong><span>已發布</span></div>
-        <div><strong>{galleries.reduce((sum, row) => sum + row.pendingCount, 0)}</strong><span>待確認</span></div>
-        <div className={settings?.originalsReadable && settings?.derivativesWritable && settings?.imagickAvailable ? 'is-healthy' : 'is-warning'}>
-          <strong>{settings?.originalsReadable && settings?.derivativesWritable && settings?.imagickAvailable ? '正常' : '需檢查'}</strong><span>儲存環境</span>
+        <div><strong>{galleries.reduce((sum, row) => sum + (row.pendingCount ?? 0), 0)}</strong><span>待確認</span></div>
+        <div className={storageHealthy ? 'is-healthy' : 'is-warning'}>
+          <strong>{storageHealthy ? '正常' : '需檢查'}</strong><span>儲存環境</span>
         </div>
       </section>
 
@@ -153,8 +193,10 @@ export function AdminApp({ config }: { config: Config }) {
                 <Check /> {selected.size === assets.items.length && assets.items.length ? '取消全選' : '全選本頁'}
               </button>
               {activeTab === 'pending_review' && <AssignControl galleries={galleries} disabled={!selected.size || !!busy} onAssign={assignSelection} />}
-              {activeTab === 'pending_review' && <button className="button" disabled={!selected.size || !!busy} onClick={() => applySelection('exclude')}><Trash2 /> 排除</button>}
+              {activeTab === 'pending_review' && <button className="button" disabled={!selected.size || !!busy} onClick={() => applySelection('exclude')}><Ban /> 排除</button>}
               {activeTab === 'pending_review' && <button className="button button-primary" disabled={!selected.size || !!busy} onClick={() => applySelection('publish')}><Check /> 發布所選</button>}
+              {activeTab === 'published' && <button className="button" disabled={!selected.size || !!busy} onClick={() => applySelection('unpublish')}><RotateCcw /> 撤回所選</button>}
+              {activeTab === 'excluded' && <button className="button" disabled={!selected.size || !!busy} onClick={() => applySelection('restore')}><ArchiveRestore /> 恢復到待發布</button>}
               {activeTab === 'error' && <button className="button" disabled={!selected.size || !!busy} onClick={() => applySelection('retry')}><RotateCcw /> 重試所選</button>}
             </div>
           </div>
@@ -165,6 +207,15 @@ export function AdminApp({ config }: { config: Config }) {
       )}
     </main>
   );
+}
+
+function ScanProgress({ job }: { job: ScanJobState }) {
+  const progress = scanJobProgress(job);
+  return <section className="taka-scan-progress" aria-live="polite">
+    <div><strong>{scanJobLabel(job)}</strong><span>{job.scanned} / {job.total || '—'} 張</span></div>
+    <progress max="100" value={progress}>{progress}%</progress>
+    <small>剩餘 {job.remaining} 張 · 發現 {job.discovered} 張 · 已排入處理 {job.queued} 張</small>
+  </section>;
 }
 
 function AssignControl({ galleries, disabled, onAssign }: { galleries: Gallery[]; disabled: boolean; onAssign: (id: number) => void }) {
@@ -186,7 +237,7 @@ function AssetGrid({ items, selected, onSelected }: { items: AdminAsset[]; selec
         return (
           <article key={asset.assetId} className={selected.has(asset.assetId) ? 'taka-asset is-selected' : 'taka-asset'}>
             <label className="taka-asset__check"><input type="checkbox" checked={selected.has(asset.assetId)} onChange={() => toggle(asset.assetId)} /><span className="screen-reader-text">選取圖片</span></label>
-            {source ? <img src={source.url} alt="" loading="lazy" /> : <div className="taka-asset__fallback" />}
+            {source ? <img src={source.url} alt="" loading="lazy" /> : <div className="taka-asset__fallback"><span>{asset.status === 'queued' ? '等待產生縮圖' : '縮圖尚未建立'}</span></div>}
             <div className="taka-asset__meta">
               <strong>{asset.galleryName || '未分類'}</strong>
               <span title={asset.relativePath}>{asset.relativePath.split('/').pop()}</span>

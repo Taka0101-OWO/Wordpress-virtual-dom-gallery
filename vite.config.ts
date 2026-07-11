@@ -9,10 +9,10 @@ import type { Plugin } from 'vite';
 const demoSecret = 'taka-gallery-local-demo-session-secret';
 const mediaCookie = 'taka_gallery_media';
 const galleries = [
-  { id: 1, name: 'Featured', slug: 'featured', status: 'publish', menuOrder: 0, publishedCount: 60, pendingCount: 0 },
-  { id: 2, name: 'Events', slug: 'events', status: 'publish', menuOrder: 1, publishedCount: 60, pendingCount: 0 },
-  { id: 3, name: 'Private Shoot', slug: 'private-shoot', status: 'publish', menuOrder: 2, publishedCount: 60, pendingCount: 0 },
-  { id: 4, name: 'Others', slug: 'others', status: 'publish', menuOrder: 3, publishedCount: 60, pendingCount: 0 },
+  { id: 1, name: 'Featured', slug: 'featured', status: 'publish', menuOrder: 0, publishedCount: 60 },
+  { id: 2, name: 'Events', slug: 'events', status: 'publish', menuOrder: 1, publishedCount: 60 },
+  { id: 3, name: 'Private Shoot', slug: 'private-shoot', status: 'publish', menuOrder: 2, publishedCount: 60 },
+  { id: 4, name: 'Others', slug: 'others', status: 'publish', menuOrder: 3, publishedCount: 60 },
 ];
 const ratios = [1.5, 0.72, 1.18, 0.64, 1.34, 0.82, 1.62, 0.92, 1.1, 0.58];
 

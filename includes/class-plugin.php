@@ -16,17 +16,20 @@ final class Plugin
         load_plugin_textdomain('taka-virtual-gallery', false, dirname(plugin_basename(TAKA_GALLERY_FILE)) . '/languages');
 
         $database = new Database();
+        $database->maybe_upgrade();
         $signer = new Signer();
         $media_session = new MediaSession();
         $processor = new ImageProcessor($database);
-        $scanner = new Scanner($database, $processor);
+        $scanner = new Scanner($database);
+        $scan_job = new ScanJob($scanner);
+        $scan_job->register();
 
-        (new RestApi($database, $scanner, $processor, $signer, $media_session))->register();
+        (new RestApi($database, $scan_job, $processor, $signer, $media_session))->register();
         (new MediaEndpoint($database, $signer, $media_session))->register();
         (new Admin($database))->register();
         (new Frontend($database))->register();
         (new ElementorIntegration())->register();
-        (new Cron($scanner, $processor))->register();
+        (new Cron($scan_job, $processor))->register();
 
         if (defined('WP_CLI') && WP_CLI) {
             (new Cli($scanner, $processor))->register();

@@ -6,7 +6,7 @@ use wpdb;
 
 final class Database
 {
-    public const DB_VERSION = '1';
+    public const DB_VERSION = '2';
 
     private wpdb $wpdb;
 
@@ -93,7 +93,7 @@ final class Database
             KEY gallery_id (gallery_id)
         ) {$charset};");
 
-        add_option('taka_gallery_db_version', self::DB_VERSION);
+        update_option('taka_gallery_db_version', self::DB_VERSION, false);
         update_option('taka_gallery_flush_rewrite', 1, false);
         add_option('taka_gallery_settings', [
             'originals_path' => '',
@@ -124,6 +124,17 @@ final class Database
         return $this->wpdb->prefix . 'taka_' . $name;
     }
 
+    public function maybe_upgrade(): void
+    {
+        if ((string) get_option('taka_gallery_db_version', '0') === self::DB_VERSION) {
+            return;
+        }
+        $folders = $this->table('gallery_folders');
+        $this->wpdb->query("UPDATE {$folders} SET scan_cursor = NULL, scan_started_at = NULL");
+        delete_option('taka_gallery_scan_job');
+        update_option('taka_gallery_db_version', self::DB_VERSION, false);
+    }
+
     public function wpdb(): wpdb
     {
         return $this->wpdb;
@@ -146,9 +157,11 @@ final class Database
         $table = $this->table('galleries');
         $where = $published_only ? "WHERE g.status = 'publish'" : '';
         $items = $this->table('gallery_items');
-        $sql = "SELECT g.*, COUNT(CASE WHEN i.status = 'publish' THEN 1 END) AS published_count,
-                       COUNT(CASE WHEN i.status = 'pending' THEN 1 END) AS pending_count
+        $assets = $this->table('assets');
+        $sql = "SELECT g.*, COUNT(CASE WHEN i.status = 'publish' AND a.status = 'published' THEN 1 END) AS published_count,
+                       COUNT(CASE WHEN i.status = 'pending' AND a.status = 'pending_review' THEN 1 END) AS pending_count
                 FROM {$table} g LEFT JOIN {$items} i ON i.gallery_id = g.id
+                LEFT JOIN {$assets} a ON a.id = i.asset_id
                 {$where} GROUP BY g.id ORDER BY g.menu_order ASC, g.id ASC";
         return $this->wpdb->get_results($sql, ARRAY_A) ?: [];
     }

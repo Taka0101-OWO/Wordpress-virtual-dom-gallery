@@ -40,6 +40,9 @@ final class MediaEndpoint
         if ($session_id === null || !$this->valid_request_context() || !$this->signer->verify($public_id, $width, $expires, $signature, $session_id)) {
             $this->fail(403, 'Expired or invalid media URL.');
         }
+        if (!self::xsendfile_ready()) {
+            $this->fail(503, 'Media delivery is unavailable.');
+        }
 
         $root = realpath((string) $this->database->settings()['derivatives_path']);
         if ($root === false) {
@@ -62,6 +65,13 @@ final class MediaEndpoint
         header('Accept-Ranges: none');
         header('X-Sendfile: ' . $real);
         exit;
+    }
+
+    public static function xsendfile_ready(): bool
+    {
+        $environment = getenv('TAKA_XSENDFILE_READY');
+        $marker = $_SERVER['TAKA_XSENDFILE_READY'] ?? ($environment === false ? '' : $environment);
+        return (string) $marker === '1';
     }
 
     private function valid_request_context(): bool

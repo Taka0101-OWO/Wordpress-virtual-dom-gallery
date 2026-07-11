@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Taka Virtual Gallery
  * Description: Private NAS-backed galleries with an Elementor widget and a virtualized masonry frontend.
- * Version: 0.1.2
+ * Version: 0.1.5
  * Requires at least: 6.6
  * Requires PHP: 8.1
  * Author: Taka
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('TAKA_GALLERY_VERSION', '0.1.2');
+define('TAKA_GALLERY_VERSION', '0.1.5');
 define('TAKA_GALLERY_FILE', __FILE__);
 define('TAKA_GALLERY_DIR', plugin_dir_path(__FILE__));
 define('TAKA_GALLERY_URL', plugin_dir_url(__FILE__));

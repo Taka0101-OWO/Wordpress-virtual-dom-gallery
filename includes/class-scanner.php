@@ -10,14 +10,14 @@ final class Scanner
 {
     private const EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'avif'];
 
-    public function __construct(private Database $database, private ImageProcessor $processor)
+    public function __construct(private Database $database)
     {
     }
 
     public function scan_all(): array
     {
         if (!$this->acquire_lock()) {
-            return ['folders' => 0, 'discovered' => 0, 'queued' => 0, 'errors' => [], 'locked' => true];
+            return ['folders' => 0, 'total' => 0, 'scanned' => 0, 'remaining' => 0, 'discovered' => 0, 'queued' => 0, 'errors' => [], 'complete' => false, 'locked' => true];
         }
         try {
             return $this->scan_all_unlocked();
@@ -33,14 +33,18 @@ final class Scanner
             "SELECT * FROM {$this->database->table('gallery_folders')} WHERE enabled = 1 ORDER BY id ASC",
             ARRAY_A
         ) ?: [];
-        $result = ['folders' => 0, 'discovered' => 0, 'queued' => 0, 'errors' => []];
+        $result = ['folders' => 0, 'total' => 0, 'scanned' => 0, 'remaining' => 0, 'discovered' => 0, 'queued' => 0, 'errors' => [], 'complete' => true];
 
         foreach ($folders as $folder) {
             try {
                 $scan = $this->scan_folder($folder);
                 $result['folders']++;
+                $result['total'] += $scan['total'];
+                $result['scanned'] += $scan['scanned'];
+                $result['remaining'] += $scan['remaining'];
                 $result['discovered'] += $scan['discovered'];
                 $result['queued'] += $scan['queued'];
+                $result['complete'] = $result['complete'] && $scan['complete'];
             } catch (\Throwable $error) {
                 $result['errors'][] = ['folderId' => (int) $folder['id'], 'message' => $error->getMessage()];
                 $wpdb->update(
@@ -53,6 +57,15 @@ final class Scanner
             }
         }
         return $result;
+    }
+
+    public function reset_progress(): void
+    {
+        $this->database->wpdb()->query(
+            "UPDATE {$this->database->table('gallery_folders')}
+             SET scan_cursor = NULL, scan_started_at = NULL, last_error = NULL
+             WHERE enabled = 1"
+        );
     }
 
     private function acquire_lock(): bool
@@ -91,17 +104,31 @@ final class Scanner
         $paths = $this->list_images($real_folder, $root);
         sort($paths, SORT_NATURAL | SORT_FLAG_CASE);
         $cursor = (string) ($folder['scan_cursor'] ?? '');
+        $offset = 0;
         if ($cursor !== '') {
-            $paths = array_values(array_filter($paths, static fn (string $path): bool => strcmp($path, $cursor) > 0));
+            $cursor_index = array_search($cursor, $paths, true);
+            if ($cursor_index === false) {
+                $started_at = current_time('mysql', true);
+                $wpdb->update($folder_table, [
+                    'scan_cursor' => null,
+                    'scan_started_at' => $started_at,
+                    'last_error' => null,
+                ], ['id' => (int) $folder['id']]);
+            } else {
+                $offset = $cursor_index + 1;
+            }
         }
-        $batch = array_slice($paths, 0, $batch_size);
-        $stats = ['discovered' => 0, 'queued' => 0];
+        $total = count($paths);
+        $batch = array_slice($paths, $offset, $batch_size);
+        $stats = ['total' => $total, 'scanned' => $offset + count($batch), 'remaining' => max(0, $total - $offset - count($batch)), 'discovered' => 0, 'queued' => 0, 'complete' => false];
         foreach ($batch as $relative_path) {
             $change = $this->observe_file((int) $folder['gallery_id'], $relative_path, $root);
-            $stats[$change]++;
+            if (isset($stats[$change])) {
+                $stats[$change]++;
+            }
         }
 
-        if (count($paths) > count($batch)) {
+        if ($stats['remaining'] > 0) {
             $wpdb->update($folder_table, ['scan_cursor' => end($batch), 'last_error' => null], ['id' => (int) $folder['id']]);
         } else {
             $this->mark_missing($relative_folder, $started_at);
@@ -110,6 +137,7 @@ final class Scanner
                 ['scan_cursor' => null, 'scan_started_at' => null, 'last_scan_at' => current_time('mysql', true), 'last_error' => null],
                 ['id' => (int) $folder['id']]
             );
+            $stats['complete'] = true;
         }
         return $stats;
     }
@@ -130,7 +158,7 @@ final class Scanner
         $asset = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$assets} WHERE path_hash = %s", $path_hash), ARRAY_A);
         $now = time();
         $now_mysql = current_time('mysql', true);
-        $state = 'discovered';
+        $state = 'unchanged';
 
         if (!$asset) {
             $wpdb->insert($assets, [
@@ -146,18 +174,27 @@ final class Scanner
                 'updated_at' => $now_mysql,
             ]);
             $asset_id = (int) $wpdb->insert_id;
+            $state = 'discovered';
         } else {
             $asset_id = (int) $asset['id'];
             $changed = (int) $asset['file_size'] !== (int) $size || (int) $asset['file_mtime'] !== (int) $mtime;
             $stable_since = $changed ? $now : (int) $asset['stable_since'];
-            $state = (!$changed && $now - $stable_since >= 30 && in_array($asset['status'], ['discovered', 'missing', 'error'], true)) ? 'queued' : (string) $asset['status'];
+            if ($changed) {
+                $state = 'discovered';
+                $status = 'discovered';
+            } elseif ($now - $stable_since >= 30 && in_array($asset['status'], ['discovered', 'missing', 'error'], true)) {
+                $state = 'queued';
+                $status = 'queued';
+            } else {
+                $status = (string) $asset['status'];
+            }
             $wpdb->update($assets, [
                 'relative_path' => $relative_path,
                 'file_size' => $size,
                 'file_mtime' => $mtime,
                 'stable_since' => $stable_since,
                 'last_seen_at' => $now_mysql,
-                'status' => $state,
+                'status' => $status,
                 'error_message' => null,
                 'updated_at' => $now_mysql,
             ], ['id' => $asset_id]);
@@ -170,7 +207,7 @@ final class Scanner
             $gallery_id,
             $asset_id
         ));
-        return $state === 'queued' ? 'queued' : 'discovered';
+        return $state;
     }
 
     private function mark_missing(string $folder, string $scan_started_at): void
